@@ -1,0 +1,8 @@
+textual
+plotext
+pasco
+bleak
+pydub
+simpleaudio
+gtts
+sqlite3
