@@ -10,12 +10,7 @@ This application monitors the temperature from a PASCO BLE sensor and triggers a
    ```bash
    pip install -r requirements.txt
    ```
-
-3. **Install PASCO BLE Library:**
-   ```bash
-   pip install pasco
-   ```
-
+   
 ## Running the Application
 
 1. **Connect the PASCO BLE Sensor:** Make sure your PASCO BLE sensor is powered on and within range of your computer.
