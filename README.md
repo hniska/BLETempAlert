@@ -59,6 +59,11 @@ This application monitors the temperature from a PASCO BLE sensor and triggers a
 - **Audio Notifications:** Plays text-to-speech announcements of temperature changes and alarm events.
 - **Push Notifications:** Sends notifications via ntfy when temperature targets are reached.
 
+## Screenshot
+
+![Temperature Alarm Interface](screenshot.png)
+*The Temperature Alarm application interface showing the temperature graph and controls*
+
 ## Notifications
 
 The application uses ntfy for push notifications. When the target temperature is reached, you'll receive:
