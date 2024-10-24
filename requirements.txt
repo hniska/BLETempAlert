@@ -2,8 +2,7 @@ textual
 plotext
 pasco
 bleak
-pydub
-simpleaudio
+pygame
 gtts
 sqlite-minutils 
 textual-plotext
