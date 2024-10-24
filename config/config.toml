@@ -1,14 +1,13 @@
 [ntfy]
 enabled = false
 server = "https://ntfy.sh"
-topic = "your-topic-name"
+topic = "kurjovikens"
 username = ""
 password = ""
 priority = "high"
 tags = [
     "thermometer",
-    "alert",
 ]
 
 [voice]
-enabled = false
+enabled = true

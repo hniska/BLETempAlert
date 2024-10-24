@@ -17,7 +17,6 @@ class NotificationManager:
             config: NtfyConfig instance with notification settings
         """
         self.config = config
-        self._client = httpx.AsyncClient()
         
     async def send_notification(
         self,
@@ -32,21 +31,30 @@ class NotificationManager:
             message: Notification message
             title: Optional notification title
             priority: Optional priority override
-            tags: Optional tags override
+            tags: Optional tags to add to configured tags
             
         Returns:
             bool: True if notification was sent successfully
         """
+        logger.info(f"Sending notification: {message}")
         if not self.config.enabled:
             logger.debug("Notifications are disabled")
             return False
             
         try:
             url = f"{self.config.server}/{self.config.topic}"
+            
+            # Merge configured tags with passed-in tags
+            all_tags = list(self.config.tags or [])  # Convert to list and handle None
+            if tags:
+                all_tags.extend(tags)
+            # Remove duplicates while preserving order
+            all_tags = list(dict.fromkeys(all_tags))
+            
             headers = {
                 "Title": title if title else "Temperature Alert",
                 "Priority": priority if priority else self.config.priority,
-                "Tags": ",".join(tags if tags else self.config.tags)
+                "Tags": ",".join(all_tags)
             }
             
             # Add authentication if configured
@@ -55,7 +63,7 @@ class NotificationManager:
             else:
                 auth = None
             
-            async with self._client as client:
+            async with httpx.AsyncClient() as client:
                 response = await client.post(
                     url,
                     content=message,
@@ -74,5 +82,5 @@ class NotificationManager:
             
     async def cleanup(self) -> None:
         """Cleanup resources"""
-        if self._client:
-            await self._client.aclose()
+        # Remove cleanup method since we no longer maintain a persistent client
+        pass

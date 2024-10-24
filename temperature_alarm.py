@@ -174,10 +174,14 @@ class TemperatureMonitor(BaseTemperatureMonitor):
             self.logger.info("Monitor loop completed")
 
     async def safe_read_temperature(self) -> Optional[float]:
-        """Safely read temperature from the sensor"""
+        """Safely read temperature from the sensor.
+
+        Returns:
+            Optional[float]: The current temperature or None if reading fails.
+        """
         if not self.temp_sensor:
+            self.logger.warning("Temperature sensor is not initialized.")
             return None
-            
         try:
             return self.temp_sensor.read_data('Temperature')
         except Exception as e:
@@ -315,18 +319,23 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                     # Only play sound if voice is enabled
                     if self.config_manager.voice_config.enabled:
                         await self.play_sound_async(f"Target temperature of {target_temp:.1f} degrees has been reached")
+                    
                     # Show popup
                     popup = NotificationPopup(f"Target temperature of {target_temp:.1f}°C has been reached!")
                     result = await app.push_screen(popup)
+                    
+                    # Send notification with high priority for target reached
                     await self.notification_manager.send_notification(
                         message=f"Target temperature of {target_temp:.1f}°C has been reached! Current temperature: {current_temp:.1f}°C",
                         title="Temperature Target Reached",
-                        priority="high"
+                        priority="high",
+                        tags=["alarm_clock"]
                     )
-                    # result will be True if OK was clicked, False if dismissed with escape
-                self.logger.info(f"Target temperature {target_temp:.1f}°C reached")
-                # Removed the app.stop_monitoring() call to continue monitoring
-            
+                    
+                    self.logger.info(f"Target temperature {target_temp:.1f}°C reached")
+                    
+                # Continue monitoring - target_reached_flag prevents repeated notifications
+
             # Announce temperature changes
             current_time = time.time()
             if (self.config_manager.voice_config.enabled and
@@ -335,6 +344,13 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                  current_time - self.last_announcement_time >= ANNOUNCE_PERIOD_S))):
                 if not self._shutting_down:
                     await self.play_sound_async(f"Current temperature is {current_temp:.1f} degrees")
+                    # Send regular temperature updates with default priority
+                    await self.notification_manager.send_notification(
+                        message=f"Current temperature is {current_temp:.1f}°C",
+                        title="Temperature Update",
+                        priority="default"
+                    )
+
                 self.last_announcement_time = current_time
                 last_announced_temp = current_temp
             

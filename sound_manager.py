@@ -11,11 +11,11 @@ logger = setup_logging(__name__)
 class AlarmSound:
     """Manages alarm sound playback from MP3."""
     
-    def __init__(self, sound_file: str = "alarm.mp3"):
+    def __init__(self, sound_file: str = "sounds/alarm.mp3"):
         """Initialize the alarm sound player.
         
         Args:
-            sound_file: Path to the MP3 file to play
+            sound_file: Path to the MP3 file to play. Defaults to 'sounds/alarm.mp3'
         """
         self.sound_file = sound_file
         self._stop_flag = threading.Event()

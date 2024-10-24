@@ -66,7 +66,7 @@ This application monitors the temperature from a PASCO BLE sensor and triggers a
 
 ## Notifications
 
-The application uses ntfy for push notifications. When the target temperature is reached, you'll receive:
+The application uses [ntfy](https://ntfy.sh) for push notifications. When the target temperature is reached, you'll receive:
 - Mobile/desktop notifications through the ntfy service
 - Customizable notification priority and tags
 - Optional authentication for private ntfy topics

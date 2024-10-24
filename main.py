@@ -1,11 +1,17 @@
+# Suppress Pygame welcome message
+import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+
 import asyncio
 import signal
 import logging
-import os
 from datetime import datetime
 from temperature_alarm import TemperatureMonitor
 from tui import TemperatureAlarmApp
 from logging_config import setup_logging
+
+# Initialize logger at module level
+logger = setup_logging(__name__)
 
 async def cleanup(app: TemperatureAlarmApp, monitor: TemperatureMonitor):
     """Clean up application resources with timeout protection."""
@@ -24,7 +30,6 @@ async def cleanup(app: TemperatureAlarmApp, monitor: TemperatureMonitor):
         # Then cleanup the app
         if app:
             try:
-                # Don't call cleanup_and_exit, just do cleanup
                 await asyncio.wait_for(app.cleanup(), timeout=5.0)
             except asyncio.TimeoutError:
                 logger.error("App cleanup timed out")
@@ -37,8 +42,10 @@ async def cleanup(app: TemperatureAlarmApp, monitor: TemperatureMonitor):
         logger.info("Cleanup completed")
 
 async def main():
-    logger = setup_logging(__name__)  # Use the centralized logging setup
     logger.info("Starting main function")
+    
+    app = None
+    monitor = None
     
     try:
         app = TemperatureAlarmApp()
@@ -51,9 +58,8 @@ async def main():
     except Exception as e:
         logger.exception(f"An error occurred: {e}")
     finally:
-        # Ensure cleanup happens
-        if 'monitor' in locals():
-            await monitor.cleanup()
+        # Use the cleanup function with timeout protection
+        await cleanup(app, monitor)
         logger.info("Application shutdown complete")
 
 if __name__ == "__main__":
@@ -62,6 +68,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nReceived keyboard interrupt, shutting down...")
     except SystemExit:
-        pass  # Handle SystemExit gracefully
+        pass
     except Exception as e:
         print(f"Fatal error: {e}")
