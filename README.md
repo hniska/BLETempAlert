@@ -77,18 +77,6 @@ The application uses ntfy for push notifications. When the target temperature is
 - The `tui.py` file implements the Textual user interface.
 - The `main.py` file runs the application.
 
-## Contributing
-
-Contributions are welcome! Please feel free to open issues or submit pull requests.
-
-## Contributors
-
-- [@Håkan Niska](https://github.com/hniska)
-
-## License
-
-This project is licensed under the MIT License.
-
 #### Configuration Details:
 
 - **enabled**: Set to `true` to enable notifications, `false` to disable
@@ -117,3 +105,54 @@ This project is licensed under the MIT License.
   - Displayed as icons in mobile notifications
   - Helps identify notification source and type
   - Common tags: 🌡️ (thermometer), ⚠️ (alert), 📊 (chart)
+
+## Mobile Device Setup
+
+### Subscribe to Notifications
+
+1. **Install the Official App:**
+   - **Android:** 
+     - [Google Play Store](https://play.google.com/store/apps/details?id=io.heckel.ntfy)
+     - [F-Droid](https://f-droid.org/en/packages/io.heckel.ntfy/) (Firebase-free version)
+   - **iOS:** 
+     - [App Store](https://apps.apple.com/us/app/ntfy/id1625396347)
+
+2. **Subscribe to Your Topic:**
+   - Open the ntfy app or PWA
+   - Add a new subscription
+   - Enter your topic URL: `https://ntfy.sh/your-topic-name` or just `your-topic-name` if using ntfy.sh
+   - If using authentication, enter your username and password
+
+### Testing the Connection
+
+1. Send a test notification:
+   ```bash
+   curl -d "Test notification" ntfy.sh/your-topic-name
+   ```
+
+2. You should receive the notification on your mobile device immediately.
+
+### Security Considerations
+
+- Keep your topic name private to prevent unauthorized notifications
+- Use authentication for sensitive topics
+- Consider using a self-hosted ntfy server for additional security
+- Topic names are case-sensitive and should be unique
+
+## Contributing
+
+Contributions are welcome! Please feel free to open issues or submit pull requests.
+
+## Contributors
+
+- [@Håkan Niska](https://github.com/hniska)
+
+## License
+
+This project is licensed under the MIT License.
+
+## Acknowledgments
+
+- [ntfy](https://ntfy.sh) - A simple pub-sub notification service that powers our push notifications. Thank you to [@binwiederhier](https://github.com/binwiederhier) for creating this excellent open-source tool.
+  - [Documentation](https://docs.ntfy.sh/)
+  - [GitHub Repository](https://github.com/binwiederhier/ntfy)
