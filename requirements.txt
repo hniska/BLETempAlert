@@ -5,4 +5,6 @@ bleak
 pydub
 simpleaudio
 gtts
-sqlite3
+sqlite-minutils 
+httpx>=0.24.0
+tomli>=2.0.1; python_version < "3.11"
