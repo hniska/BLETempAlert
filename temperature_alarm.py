@@ -2,11 +2,9 @@ import signal
 import sys
 from gtts import gTTS
 from io import BytesIO
-from pydub import AudioSegment
-import simpleaudio as sa
 from pasco.pasco_ble_device import PASCOBLEDevice
 import time
-from typing import Literal, Optional, List
+from typing import Literal, Optional
 import sqlite3
 from datetime import datetime
 import plotext as plt
@@ -26,6 +24,7 @@ from sound_manager import AlarmSound
 from threading import Event
 from config_manager import ConfigManager
 from notification_manager import NotificationManager
+import pygame
 
 ANNOUNCE_PERIOD_S = 15
 CHECK_PERIOD_S = 2  # Temperature sampling every 2 seconds
@@ -313,7 +312,9 @@ class TemperatureMonitor(BaseTemperatureMonitor):
             if not target_reached_flag and target_reached(direction, target_temp, current_temp):
                 target_reached_flag = True
                 if not self._shutting_down:
-                    await self.play_sound_async(f"Target temperature of {target_temp:.1f} degrees has been reached")
+                    # Only play sound if voice is enabled
+                    if self.config_manager.voice_config.enabled:
+                        await self.play_sound_async(f"Target temperature of {target_temp:.1f} degrees has been reached")
                     # Show popup
                     popup = NotificationPopup(f"Target temperature of {target_temp:.1f}°C has been reached!")
                     result = await app.push_screen(popup)
@@ -328,9 +329,10 @@ class TemperatureMonitor(BaseTemperatureMonitor):
             
             # Announce temperature changes
             current_time = time.time()
-            if (last_announced_temp is None or 
+            if (self.config_manager.voice_config.enabled and
+                (last_announced_temp is None or 
                 (abs(current_temp - last_announced_temp) >= 1.0 and 
-                 current_time - self.last_announcement_time >= ANNOUNCE_PERIOD_S)):
+                 current_time - self.last_announcement_time >= ANNOUNCE_PERIOD_S))):
                 if not self._shutting_down:
                     await self.play_sound_async(f"Current temperature is {current_temp:.1f} degrees")
                 self.last_announcement_time = current_time
@@ -341,36 +343,42 @@ class TemperatureMonitor(BaseTemperatureMonitor):
         except Exception as e:
             self.logger.error(f"Error in temperature update: {e}")
             return target_reached_flag, last_announced_temp
-
+    
     def play_sound(self, message: str) -> None:
         """
-        Play a text-to-speech message.
+        Play a text-to-speech message directly from memory without saving to disk.
         
         Args:
             message: The text message to convert to speech and play
+        
+        Raises:
+            RuntimeError: If pygame mixer initialization fails
+            Exception: For other errors during TTS or playback
         """
         try:
-            # Create gTTS object
+            # Initialize pygame mixer first to catch initialization errors early
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+                
+            # Convert message to speech and write to BytesIO (in MP3 format)
             tts = gTTS(text=message, lang='en')
-            
-            # Save to BytesIO buffer
             fp = BytesIO()
             tts.write_to_fp(fp)
             fp.seek(0)
-            
-            # Convert to wav using pydub
-            audio = AudioSegment.from_mp3(fp)
-            wav_fp = BytesIO()
-            audio.export(wav_fp, format='wav')
-            wav_fp.seek(0)
-            
-            # Play using simpleaudio
-            wav_obj = sa.WaveObject.from_wave_file(wav_fp)
-            play_obj = wav_obj.play()
-            play_obj.wait_done()
-            
+
+            # Load and play audio from BytesIO object
+            pygame.mixer.music.load(fp, 'mp3')
+            pygame.mixer.music.play()
+
+            # Keep the program running while the audio plays
+            while pygame.mixer.music.get_busy():
+                pygame.time.Clock().tick(10)
+
         except Exception as e:
-            self.logger.error(f"Error playing sound: {e}")
+            print(f"Error playing sound: {e}")
+        finally:
+            # Clean up resources
+            pygame.mixer.quit()
 
     async def play_sound_async(self, message: str) -> None:
         """

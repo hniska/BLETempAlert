@@ -1,10 +1,14 @@
 [ntfy]
-enabled = true
+enabled = false
 server = "https://ntfy.sh"
 topic = "your-topic-name"
-# Optional authentication
 username = ""
 password = ""
-# Notification settings
 priority = "high"
-tags = ["thermometer", "alert"]
+tags = [
+    "thermometer",
+    "alert",
+]
+
+[voice]
+enabled = false

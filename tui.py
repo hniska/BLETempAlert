@@ -167,6 +167,16 @@ class TemperatureAlarmApp(App):
         margin: 0 1;
         align: center middle;  # For widget alignment in container
     }
+
+    #ntfy_topic_input {
+        width: 30%;  # Adjust width as needed
+        margin-left: 1;
+    }
+
+    #voice_switch {
+        margin-left: 1;
+        align: center middle;
+    }
     """
 
     def __init__(self):
@@ -202,11 +212,14 @@ class TemperatureAlarmApp(App):
                 Input(placeholder="e.g., 25.5", id="target_input"),
                 id="target_input_container"
             ),
-            # Right side - Notifications (removed separator)
+            # Right side - Notifications
             Horizontal(
                 Label("Notifications:"),
                 Switch(value=False, id="ntfy_switch"),
-                Label("", id="ntfy_topic"),
+                Label("Topic:"),
+                Input(placeholder="ntfy topic", id="ntfy_topic_input"),
+                Label("Voice:"),
+                Switch(value=True, id="voice_switch"),
                 id="notification_settings"
             ),
             id="settings_row"
@@ -497,6 +510,8 @@ class TemperatureAlarmApp(App):
         """Handle input submission events."""
         if message.input.id == "target_input":
             await self._set_target_temperature(message.value)
+        elif message.input.id == "ntfy_topic_input":
+            await self._update_ntfy_topic(message.value)
 
     async def _set_target_temperature(self, value: str) -> None:
         """
@@ -611,26 +626,54 @@ class TemperatureAlarmApp(App):
 
     def _init_notification_settings(self) -> None:
         """Initialize notification settings from config."""
-        if hasattr(self, 'monitor') and hasattr(self.monitor, 'notification_manager'):
-            config = self.monitor.notification_manager.config
+        if hasattr(self, 'monitor') and hasattr(self.monitor, 'config_manager'):
+            config_manager = self.monitor.config_manager
             
-            # Update switch state
-            switch = self.query_one("#ntfy_switch", Switch)
-            switch.value = config.enabled
+            # Update ntfy switch state
+            ntfy_switch = self.query_one("#ntfy_switch", Switch)
+            ntfy_switch.value = config_manager.ntfy_config.enabled
             
-            # Update topic display
-            topic_label = self.query_one("#ntfy_topic", Label)
-            topic_label.update(f"Ntfy Topic: {config.topic}")
+            # Update voice switch state
+            voice_switch = self.query_one("#voice_switch", Switch)
+            voice_switch.value = config_manager.voice_config.enabled
+            
+            # Update topic input
+            topic_input = self.query_one("#ntfy_topic_input", Input)
+            topic_input.value = config_manager.ntfy_config.topic
 
     async def on_switch_changed(self, event: Switch.Changed) -> None:
         """Handle notification switch changes."""
+        if not hasattr(self, 'monitor') or not hasattr(self.monitor, 'config_manager'):
+            return
+
         if event.switch.id == "ntfy_switch":
-            if hasattr(self, 'monitor') and hasattr(self.monitor, 'notification_manager'):
-                self.monitor.notification_manager.config.enabled = event.value
+            self.monitor.config_manager.update_ntfy_config(enabled=event.value)
+            status = "enabled" if event.value else "disabled"
+            self.notify(f"Notifications {status}", severity="information")
+            
+        elif event.switch.id == "voice_switch":
+            self.monitor.config_manager.update_voice_config(event.value)
+            status = "enabled" if event.value else "disabled"
+            self.notify(f"Voice notifications {status}", severity="information")
+
+    async def _update_ntfy_topic(self, topic: str) -> None:
+        """Update the ntfy topic in config and notification manager.
+        
+        Args:
+            topic: The new topic value
+        """
+        if hasattr(self, 'monitor') and hasattr(self.monitor, 'notification_manager'):
+            try:
+                # Update the config through config manager
+                self.monitor.config_manager.update_ntfy_config(topic=topic)
                 
-                # Show confirmation message
-                status = "enabled" if event.value else "disabled"
-                self.notify(f"Notifications {status}", severity="information")
+                # Update the notification manager's config to match
+                self.monitor.notification_manager.config.topic = topic
+                
+                self.notify(f"Ntfy topic updated to: {topic}", severity="success")
+            except Exception as e:
+                self.logger.error(f"Failed to update ntfy topic: {e}")
+                self.notify(f"Failed to update topic: {str(e)}", severity="error")
 
 if __name__ == "__main__":
     app = TemperatureAlarmApp()

@@ -10,6 +10,25 @@ else:
     import tomli as tomllib
 
 @dataclass
+class VoiceConfig:
+    """Configuration for voice notifications"""
+    enabled: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'VoiceConfig':
+        """Create VoiceConfig from dictionary
+        
+        Args:
+            data: Dictionary containing voice configuration
+            
+        Returns:
+            VoiceConfig: Initialized configuration object
+        """
+        return cls(
+            enabled=data.get('enabled', True)
+        )
+
+@dataclass
 class NtfyConfig:
     """Configuration for ntfy notifications"""
     enabled: bool
@@ -22,14 +41,7 @@ class NtfyConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'NtfyConfig':
-        """Create NtfyConfig from dictionary
-        
-        Args:
-            data: Dictionary containing ntfy configuration
-            
-        Returns:
-            NtfyConfig: Initialized configuration object
-        """
+        """Create NtfyConfig from dictionary"""
         return cls(
             enabled=data.get('enabled', False),
             server=data.get('server', 'https://ntfy.sh'),
@@ -54,6 +66,8 @@ class ConfigManager:
         """
         self.config_path = Path(config_path)
         self.ntfy_config: Optional[NtfyConfig] = None
+        self.voice_config: Optional[VoiceConfig] = None
+        self._raw_config: dict = {}  # Store the raw config
         self._load_config()
     
     def _load_config(self) -> None:
@@ -67,19 +81,49 @@ class ConfigManager:
             raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
             
         with open(self.config_path, "rb") as f:
-            config = tomllib.load(f)
+            self._raw_config = tomllib.load(f)
             
-        self.ntfy_config = NtfyConfig.from_dict(config.get('ntfy', {}))
+        self.ntfy_config = NtfyConfig.from_dict(self._raw_config.get('ntfy', {}))
+        self.voice_config = VoiceConfig.from_dict(self._raw_config.get('voice', {}))
 
-    def update_ntfy_config(self, enabled: bool) -> None:
-        """Update ntfy configuration
-    
-        Args:
-            enabled: Whether notifications should be enabled
-        """
-        self.ntfy_config.enabled = enabled
+    def update_ntfy_config(self, **kwargs) -> None:
+        """Update ntfy configuration with provided values
         
-        # Optionally persist the change to config file
-        config = self.load_config()
-        config['ntfy']['enabled'] = enabled
-        self.save_config(config)
+        Args:
+            **kwargs: Key-value pairs to update in ntfy config
+            
+        Example:
+            update_ntfy_config(enabled=True, topic="new_topic")
+        """
+        # Update the NtfyConfig object
+        for key, value in kwargs.items():
+            if hasattr(self.ntfy_config, key):
+                setattr(self.ntfy_config, key, value)
+        
+        # Update the raw config
+        if 'ntfy' not in self._raw_config:
+            self._raw_config['ntfy'] = {}
+        self._raw_config['ntfy'].update(kwargs)
+        
+        # Save to file
+        import tomli_w
+        with open(self.config_path, "wb") as f:
+            tomli_w.dump(self._raw_config, f)
+
+    def update_voice_config(self, enabled: bool) -> None:
+        """Update voice configuration
+        
+        Args:
+            enabled: Whether voice notifications should be enabled
+        """
+        self.voice_config.enabled = enabled
+        
+        # Update the raw config
+        if 'voice' not in self._raw_config:
+            self._raw_config['voice'] = {}
+        self._raw_config['voice']['enabled'] = enabled
+        
+        # Save to file
+        import tomli_w
+        with open(self.config_path, "wb") as f:
+            tomli_w.dump(self._raw_config, f)
