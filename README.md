@@ -4,13 +4,28 @@ This application monitors the temperature from a PASCO BLE sensor and triggers a
 
 ## Installation
 
-1. **Install Python:** Ensure you have Python 3.7 or later installed.
+1. **Install Python:** Ensure you have Python 3.11 or later installed.
 
 2. **Install Required Packages:**
    ```bash
    pip install -r requirements.txt
    ```
-   
+
+3. **Configure Notifications:**
+   Create a `config/config.toml` file with your ntfy settings:
+   ```toml
+   [ntfy]
+   enabled = true
+   server = "https://ntfy.sh"
+   topic = "your-topic-name"
+   # Optional authentication
+   username = ""
+   password = ""
+   # Notification settings
+   priority = "high"
+   tags = ["thermometer", "alert"]
+   ```
+
 ## Running the Application
 
 1. **Connect the PASCO BLE Sensor:** Make sure your PASCO BLE sensor is powered on and within range of your computer.
@@ -42,11 +57,21 @@ This application monitors the temperature from a PASCO BLE sensor and triggers a
 - **Graphical Display:** Shows a real-time graph of the temperature data.
 - **Logging:** Logs temperature readings to a database for later analysis.
 - **Audio Notifications:** Plays text-to-speech announcements of temperature changes and alarm events.
+- **Push Notifications:** Sends notifications via ntfy when temperature targets are reached.
+
+## Notifications
+
+The application uses ntfy for push notifications. When the target temperature is reached, you'll receive:
+- Mobile/desktop notifications through the ntfy service
+- Customizable notification priority and tags
+- Optional authentication for private ntfy topics
+- Real-time temperature updates with configurable settings
 
 ## Notes
 
 - The application requires a PASCO BLE sensor to function.
 - The `requirements.txt` file lists all necessary Python packages.
+- The `config/config.toml` file contains notification settings.
 - The `logging_config.py` file configures logging for the application.
 - The `temperature_alarm.py` file contains the core temperature monitoring logic.
 - The `tui.py` file implements the Textual user interface.
@@ -56,6 +81,39 @@ This application monitors the temperature from a PASCO BLE sensor and triggers a
 
 Contributions are welcome! Please feel free to open issues or submit pull requests.
 
+## Contributors
+
+- [@Håkan Niska](https://github.com/hniska)
+
 ## License
 
 This project is licensed under the MIT License.
+
+#### Configuration Details:
+
+- **enabled**: Set to `true` to enable notifications, `false` to disable
+- **server**: 
+  - Default is "https://ntfy.sh"
+  - Can be set to your self-hosted ntfy server
+  - Must include the protocol (http:// or https://)
+
+- **topic**: 
+  - Your unique notification topic
+  - Keep this private to prevent unauthorized notifications
+  - Used in the URL: `{server}/{topic}`
+
+- **username/password**:
+  - Optional authentication for private topics
+  - Leave empty for public topics
+  - Both must be set if authentication is needed
+
+- **priority**: Controls notification importance
+  - `"default"`: Normal priority
+  - `"low"`: Low priority, may be delayed
+  - `"high"`: High priority, immediate delivery
+  - `"urgent"`: Maximum priority, bypass do-not-disturb
+
+- **tags**: List of emoji tags shown in notifications
+  - Displayed as icons in mobile notifications
+  - Helps identify notification source and type
+  - Common tags: 🌡️ (thermometer), ⚠️ (alert), 📊 (chart)

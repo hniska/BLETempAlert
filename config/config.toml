@@ -1,0 +1,10 @@
+[ntfy]
+enabled = true
+server = "https://ntfy.sh"
+topic = "your-topic-name"
+# Optional authentication
+username = ""
+password = ""
+# Notification settings
+priority = "high"
+tags = ["thermometer", "alert"]

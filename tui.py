@@ -10,7 +10,7 @@ import textual.css.query  # Add this import at the top of the file
 nest_asyncio.apply()
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Static, Button, Input, Label, Select
+from textual.widgets import Header, Footer, Static, Button, Input, Label, Select, Switch, Pretty
 from textual.containers import Container, Horizontal, Vertical
 from pasco.pasco_ble_device import PASCOBLEDevice
 from textual.message import Message
@@ -51,7 +51,7 @@ class TemperatureAlarmApp(App):
     CSS = """
     TemperatureDisplay, TargetTemperature {
         height: 3;
-        content-align: center middle;
+        content-align: center middle;  # This is correct for Static widgets
         background: $boost;
         width: 100%;
     }
@@ -127,6 +127,46 @@ class TemperatureAlarmApp(App):
         margin: 1 0;
         width: 100%;
     }
+
+    #settings_row {
+        height: 3;
+        margin: 1 0;
+        align: left middle;  # Align the entire row
+    }
+
+    #target_input_container {
+        width: 50%;
+        height: 3;
+        margin: 0 1;
+        content-align: left middle;  # For Static content alignment
+    }
+
+    #target_input {
+        width: 50%;
+    }
+
+    #notification_settings {
+        width: 50%;
+        height: 3;
+        margin: 0 1;
+        content-align: left middle;  # For Static content alignment
+    }
+
+    #notification_settings Label {
+        margin-right: 1;
+        content-align: left middle;  # For Label content alignment
+    }
+
+    #ntfy_topic {
+        margin-left: 2;
+        color: $text;
+        content-align: left middle;  # For Label content alignment
+    }
+
+    Switch {
+        margin: 0 1;
+        align: center middle;  # For widget alignment in container
+    }
     """
 
     def __init__(self):
@@ -144,25 +184,36 @@ class TemperatureAlarmApp(App):
         yield Header()
         yield Horizontal(
             Button("Scan for Devices", id="scan_button", variant="primary"),
-            # Initialize Select with empty options list and prompt
             Select(
-                options=[],  # Empty initial options list
-                prompt="Select a device",  # Prompt text when no selection
+                options=[],
+                prompt="Select a device",
                 id="device_select"
             ),
             id="device_selection_container"
         )
         yield TemperatureDisplay()
         yield TargetTemperature()
-        yield PlotextPlot(id="temperature_plot")  # Replace TemperatureGraph with PlotextPlot
+        yield PlotextPlot(id="temperature_plot")
+        # Combined target temperature and notifications row
         yield Horizontal(
-            Label("Enter target temperature: "),
-            Input(placeholder="e.g., 25.5", id="target_input"),
-            id="target_input_container"
+            # Left side - Target Temperature
+            Horizontal(
+                Label("Enter target temperature: "),
+                Input(placeholder="e.g., 25.5", id="target_input"),
+                id="target_input_container"
+            ),
+            # Right side - Notifications (removed separator)
+            Horizontal(
+                Label("Notifications:"),
+                Switch(value=False, id="ntfy_switch"),
+                Label("", id="ntfy_topic"),
+                id="notification_settings"
+            ),
+            id="settings_row"
         )
-        yield Horizontal(  # Changed from Vertical to Horizontal
+        yield Horizontal(
             Button("Start Monitoring", id="toggle_monitoring", variant="success"),
-            Static(classes="vertical-separator"),  # Changed from separator to vertical-separator
+            Static(classes="vertical-separator"),
             Button("Exit", id="exit_button", variant="error"),
             id="button_container"
         )
@@ -360,6 +411,9 @@ class TemperatureAlarmApp(App):
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self._handle_signal()))
+        
+        # Initialize notification settings
+        self._init_notification_settings()
 
     async def _handle_signal(self):
         """Handle interrupt signals."""
@@ -555,7 +609,29 @@ class TemperatureAlarmApp(App):
         popup = NotificationPopup(message)
         return await self.push_screen(popup)
 
+    def _init_notification_settings(self) -> None:
+        """Initialize notification settings from config."""
+        if hasattr(self, 'monitor') and hasattr(self.monitor, 'notification_manager'):
+            config = self.monitor.notification_manager.config
+            
+            # Update switch state
+            switch = self.query_one("#ntfy_switch", Switch)
+            switch.value = config.enabled
+            
+            # Update topic display
+            topic_label = self.query_one("#ntfy_topic", Label)
+            topic_label.update(f"Ntfy Topic: {config.topic}")
+
+    async def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Handle notification switch changes."""
+        if event.switch.id == "ntfy_switch":
+            if hasattr(self, 'monitor') and hasattr(self.monitor, 'notification_manager'):
+                self.monitor.notification_manager.config.enabled = event.value
+                
+                # Show confirmation message
+                status = "enabled" if event.value else "disabled"
+                self.notify(f"Notifications {status}", severity="information")
+
 if __name__ == "__main__":
     app = TemperatureAlarmApp()
     app.run()
-

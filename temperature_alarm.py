@@ -24,6 +24,8 @@ from textual.app import ComposeResult  # Add this import
 from textual.events import Key
 from sound_manager import AlarmSound
 from threading import Event
+from config_manager import ConfigManager
+from notification_manager import NotificationManager
 
 ANNOUNCE_PERIOD_S = 15
 CHECK_PERIOD_S = 2  # Temperature sampling every 2 seconds
@@ -89,6 +91,13 @@ class TemperatureMonitor(BaseTemperatureMonitor):
         self._setup_logging()
         self.thread_pool = ThreadPoolExecutor(max_workers=1)
         self.exit_flag = exit_flag  # Use the global exit flag
+        
+        # Initialize notification manager with config
+        config_manager = ConfigManager()
+        self.notification_manager = NotificationManager(config_manager.ntfy_config)
+        
+        # Store config manager reference
+        self.config_manager = config_manager
         
     def _setup_logging(self):
         """Set up logging for the temperature monitor"""
@@ -222,6 +231,10 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                         except Exception as e:
                             self.logger.error(f"Error in forced thread pool shutdown: {e}")
 
+            # Clean up notification manager
+            if hasattr(self, 'notification_manager'):
+                await self.notification_manager.cleanup()
+
             # Clean up database connection
             if self.db_connection:
                 try:
@@ -256,8 +269,6 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                     time.sleep(0.5)
             except Exception as e:
                 self.logger.error(f"Error in _disconnect_sensor: {e}")
-
-    # ... (other methods)
 
     async def _handle_temperature_update(
         self, app: 'TemperatureAlarmApp', 
@@ -306,6 +317,11 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                     # Show popup
                     popup = NotificationPopup(f"Target temperature of {target_temp:.1f}°C has been reached!")
                     result = await app.push_screen(popup)
+                    await self.notification_manager.send_notification(
+                        message=f"Target temperature of {target_temp:.1f}°C has been reached! Current temperature: {current_temp:.1f}°C",
+                        title="Temperature Target Reached",
+                        priority="high"
+                    )
                     # result will be True if OK was clicked, False if dismissed with escape
                 self.logger.info(f"Target temperature {target_temp:.1f}°C reached")
                 # Removed the app.stop_monitoring() call to continue monitoring
@@ -614,3 +630,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
