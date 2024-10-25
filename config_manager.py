@@ -52,6 +52,20 @@ class NtfyConfig:
             tags=data.get('tags', [])
         )
 
+@dataclass
+class DataRecordingConfig:  # Changed from DatabaseConfig
+    """Configuration for temperature data recording"""
+    enabled: bool
+    path: str = "data/temperature_logs.db"
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DataRecordingConfig':
+        """Create DataRecordingConfig from dictionary"""
+        return cls(
+            enabled=data.get('enabled', True),
+            path=data.get('path', 'data/temperature_logs.db')
+        )
+
 class ConfigManager:
     """Manages application configuration using TOML format"""
     
@@ -67,6 +81,7 @@ class ConfigManager:
         self.config_path = Path(config_path)
         self.ntfy_config: Optional[NtfyConfig] = None
         self.voice_config: Optional[VoiceConfig] = None
+        self.data_recording_config: Optional[DataRecordingConfig] = None  # Changed from database_config
         self._raw_config: dict = {}  # Store the raw config
         self._load_config()
     
@@ -85,6 +100,9 @@ class ConfigManager:
             
         self.ntfy_config = NtfyConfig.from_dict(self._raw_config.get('ntfy', {}))
         self.voice_config = VoiceConfig.from_dict(self._raw_config.get('voice', {}))
+        self.data_recording_config = DataRecordingConfig.from_dict(
+            self._raw_config.get('data_recording', {})  # Changed from database
+        )
 
     def update_ntfy_config(self, **kwargs) -> None:
         """Update ntfy configuration with provided values
@@ -124,6 +142,22 @@ class ConfigManager:
         self._raw_config['voice']['enabled'] = enabled
         
         # Save to file
+        import tomli_w
+        with open(self.config_path, "wb") as f:
+            tomli_w.dump(self._raw_config, f)
+
+    def update_data_recording_config(self, enabled: bool) -> None:  # Changed from update_database_config
+        """Update temperature data recording configuration
+        
+        Args:
+            enabled: Whether temperature recording should be enabled
+        """
+        self.data_recording_config.enabled = enabled
+        
+        if 'data_recording' not in self._raw_config:  # Changed from database
+            self._raw_config['data_recording'] = {}
+        self._raw_config['data_recording']['enabled'] = enabled
+        
         import tomli_w
         with open(self.config_path, "wb") as f:
             tomli_w.dump(self._raw_config, f)

@@ -88,7 +88,7 @@ def setup_logging(name: str = None) -> logging.Logger:
             for handler in root_logger.handlers[:]:
                 root_logger.removeHandler(handler)
                 
-        root_logger.setLevel(logging.INFO)
+        root_logger.setLevel(logging.DEBUG)
         
         # Create and configure file handler
         file_handler = logging.FileHandler(log_file)
@@ -109,11 +109,12 @@ def setup_logging(name: str = None) -> logging.Logger:
         root_logger.addHandler(dual_handler)
         
         # Set third-party loggers to WARNING level
+        
         for module in ['bleak', 'bleak.backends.bluezdbus.client', 
                       'bleak.backends.bluezdbus.manager',
-                      'bleak.backends.bluezdbus.scanner', 'gtts.tts']:
+                      'bleak.backends.bluezdbus.scanner', 'gtts.tts', 'tui', 'gtts.lang']:
             logging.getLogger(module).setLevel(logging.WARNING)
-
+        
         # Log setup completion
         logger = logging.getLogger(name) if name else root_logger
         logger.info(f"Logging setup completed for {name if name else 'root'}")

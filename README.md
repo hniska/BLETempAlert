@@ -12,18 +12,23 @@ This application monitors the temperature from a PASCO BLE sensor and triggers a
    ```
 
 3. **Configure Notifications:**
-   Create a `config/config.toml` file with your ntfy settings:
+   Create a `config/config.toml` file with your settings:
    ```toml
    [ntfy]
    enabled = true
    server = "https://ntfy.sh"
    topic = "your-topic-name"
-   # Optional authentication
    username = ""
    password = ""
-   # Notification settings
    priority = "high"
-   tags = ["thermometer", "alert"]
+   tags = ["thermometer"]
+
+   [voice]
+   enabled = true
+
+   [data_recording]
+   enabled = true
+   path = "data/temperature_logs.db"
    ```
 
 ## Running the Application
@@ -55,9 +60,9 @@ This application monitors the temperature from a PASCO BLE sensor and triggers a
 - **Temperature Monitoring:** Continuously monitors the temperature from the selected PASCO BLE sensor.
 - **Target Temperature Alarm:** Triggers an alarm when the temperature reaches the set target.
 - **Graphical Display:** Shows a real-time graph of the temperature data.
-- **Logging:** Logs temperature readings to a database for later analysis.
 - **Audio Notifications:** Plays text-to-speech announcements of temperature changes and alarm events.
 - **Push Notifications:** Sends notifications via ntfy when temperature targets are reached.
+- **Data Recording:** Configurable temperature data recording to SQLite database
 
 ## Screenshot
 
@@ -75,15 +80,11 @@ The application uses [ntfy](https://ntfy.sh) for push notifications. When the ta
 ## Notes
 
 - The application requires a PASCO BLE sensor to function.
-- The `requirements.txt` file lists all necessary Python packages.
 - The `config/config.toml` file contains notification settings.
-- The `logging_config.py` file configures logging for the application.
-- The `temperature_alarm.py` file contains the core temperature monitoring logic.
-- The `tui.py` file implements the Textual user interface.
-- The `main.py` file runs the application.
 
 #### Configuration Details:
 
+[ntfy]
 - **enabled**: Set to `true` to enable notifications, `false` to disable
 - **server**: 
   - Default is "https://ntfy.sh"
@@ -91,7 +92,7 @@ The application uses [ntfy](https://ntfy.sh) for push notifications. When the ta
   - Must include the protocol (http:// or https://)
 
 - **topic**: 
-  - Your unique notification topic
+  - Your notification topic (default: "your-topic-name")
   - Keep this private to prevent unauthorized notifications
   - Used in the URL: `{server}/{topic}`
 
@@ -100,17 +101,22 @@ The application uses [ntfy](https://ntfy.sh) for push notifications. When the ta
   - Leave empty for public topics
   - Both must be set if authentication is needed
 
-- **priority**: Controls notification importance
-  - `"default"`: Normal priority
-  - `"low"`: Low priority, may be delayed
-  - `"high"`: High priority, immediate delivery
-  - `"urgent"`: Maximum priority, bypass do-not-disturb
+- **priority**: 
+  - Set to "high" by default
+  - Controls notification importance
+  - Other options: "default", "low", "urgent"
 
-- **tags**: List of emoji tags shown in notifications
+- **tags**: 
+  - List of emoji tags shown in notifications
+  - Currently configured for: 🌡️ (thermometer)
   - Displayed as icons in mobile notifications
-  - Helps identify notification source and type
-  - Common tags: 🌡️ (thermometer), ⚠️ (alert), 📊 (chart)
 
+[voice]
+- **enabled**: Set to `true` to enable voice features
+
+[data_recording]
+- **enabled**: Set to `true` to enable data logging
+- **path**: Specifies the SQLite database location (default: "data/temperature_logs.db")
 ## Mobile Device Setup
 
 ### Subscribe to Notifications

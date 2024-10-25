@@ -18,7 +18,7 @@ async def cleanup(app: TemperatureAlarmApp, monitor: TemperatureMonitor):
     logger.info("Starting application cleanup")
     
     try:
-        # First cleanup the monitor (includes sensor disconnection)
+        # First cleanup the monitor (includes sensor and database disconnection)
         if monitor:
             try:
                 await asyncio.wait_for(monitor.cleanup(), timeout=5.0)

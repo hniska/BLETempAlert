@@ -1,7 +1,7 @@
 [ntfy]
 enabled = false
 server = "https://ntfy.sh"
-topic = "kurjovikens"
+topic = "your-topic-name"
 username = ""
 password = ""
 priority = "high"
@@ -11,3 +11,7 @@ tags = [
 
 [voice]
 enabled = true
+
+[data_recording]
+enabled = true
+path = "data/temperature_logs.db"

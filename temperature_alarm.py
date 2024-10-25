@@ -20,11 +20,14 @@ from textual.containers import Container
 from textual.widgets import Button, Label
 from textual.app import ComposeResult  # Add this import
 from textual.events import Key
-from sound_manager import AlarmSound
+from sound_manager import AsyncSoundPlayer  # Update import
 from threading import Event
 from config_manager import ConfigManager
 from notification_manager import NotificationManager
 import pygame
+from aiosqlite import Connection as AioConnection
+from pathlib import Path
+from database_manager import DatabaseManager
 
 ANNOUNCE_PERIOD_S = 15
 CHECK_PERIOD_S = 2  # Temperature sampling every 2 seconds
@@ -45,7 +48,7 @@ class NotificationPopup(ModalScreen[bool]):
         """
         super().__init__()
         self.message = message
-        self.alarm = AlarmSound("alarm.mp3")  # Update path to your MP3 file
+        self.alarm = AsyncSoundPlayer("sounds/alarm.mp3", continuous=True)  # Updated to AsyncSoundPlayer
 
     BINDINGS = [("escape", "dismiss", "Dismiss")]
 
@@ -57,34 +60,378 @@ class NotificationPopup(ModalScreen[bool]):
             id="popup_container",
         )
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:  # Made async
         """Start the alarm when the popup is mounted."""
-        self.alarm.start()
+        await self.alarm.start()  # Added await
 
-    def _stop_alarm(self) -> None:
+    async def _stop_alarm(self) -> None:  # Made async
         """Stop the alarm sound immediately."""
         if hasattr(self, 'alarm'):
-            self.alarm.stop()
-            # Add a small delay to ensure the sound stops
-            time.sleep(0.1)
+            await self.alarm.stop()  # Added await
+            await asyncio.sleep(0.1)  # Changed to asyncio.sleep
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:  # Made async
         """Handle button press event."""
         if event.button.id == "ok_button":
-            self._stop_alarm()  # Stop alarm before dismissing
+            await self._stop_alarm()  # Added await
             self.dismiss(True)
 
-    def on_key(self, event: Key) -> None:
+    async def on_key(self, event: Key) -> None:  # Made async
         """Handle key press event."""
         if event.key == "escape":
-            self._stop_alarm()  # Stop alarm before dismissing
+            await self._stop_alarm()  # Added await
             self.dismiss(False)
 
-    def on_unmount(self) -> None:
+    async def on_unmount(self) -> None:  # Made async
         """Ensure alarm is stopped when popup is unmounted."""
-        self._stop_alarm()
+        await self._stop_alarm()  # Added await
 
 class TemperatureMonitor(BaseTemperatureMonitor):
+    def __init__(self, sample_rate: float = 2.0):
+        super().__init__(sample_rate)
+        self._setup_logging()
+        
+        # Initialize managers
+        config_manager = ConfigManager()
+        self.notification_manager = NotificationManager(config_manager.ntfy_config)
+        self.db_manager = DatabaseManager(config_manager.data_recording_config)
+        self.config_manager = config_manager
+        self.tts_player = AsyncSoundPlayer(None)
+        
+        # Initialize state
+        self.recording_enabled = self.config_manager.data_recording_config.enabled
+        self.run_id = None
+        self.running_tasks = []
+
+    def _setup_logging(self):
+        """Set up logging for the temperature monitor"""
+        self.logger = logger
+
+    async def monitor_temperature(self, app: TemperatureUI, 
+                                direction: Literal['increases', 'decreases'], 
+                                target_temp: float) -> None:
+        """Monitor temperature and handle announcements and logging"""
+        try:
+            self.logger.debug("Starting temperature monitoring")
+            
+            # Initialize database if not already done
+            if not self.db_manager.connection:
+                await self.db_manager.initialize()
+            
+            # Create new run and enable recording
+            if self.config_manager.data_recording_config.enabled:
+                await self.enable_recording(target_temp, direction)
+            
+            next_read_time = time.time()
+            last_announced_temp: Optional[float] = None
+            target_reached_flag = False
+            start_time = time.time()
+            consecutive_errors = 0
+            max_consecutive_errors = 5
+            self.last_announcement_time = 0
+
+            # Reset exit flag when starting monitoring
+            self.exit_flag.clear()
+
+            # Create a monitoring task that doesn't block the event loop
+            monitoring_task = asyncio.create_task(self._monitor_loop(
+                app, direction, target_temp, next_read_time, last_announced_temp,
+                target_reached_flag, start_time, consecutive_errors, max_consecutive_errors
+            ))
+            self.running_tasks.append(monitoring_task)
+
+        except Exception as e:
+            self.logger.exception(f"Error in monitor_temperature: {e}")
+            await app.stop_monitoring()
+
+    async def _monitor_loop(self, app, direction, target_temp, next_read_time,
+                            last_announced_temp, target_reached_flag, start_time,
+                            consecutive_errors, max_consecutive_errors):
+        """Internal monitoring loop that runs as a separate task"""
+        try:
+            while not self.exit_flag.is_set():
+                try:
+                    if time.time() >= next_read_time:
+                        current_temp = await self.safe_read_temperature()
+                        current_time = datetime.now()
+
+                        if current_temp is None:
+                            consecutive_errors += 1
+                            if consecutive_errors >= max_consecutive_errors:
+                                self.logger.error("Failed to read temperature")
+                                await app.stop_monitoring()
+                                break
+                            await asyncio.sleep(self.sample_rate / 2)  # Wait half the sample time before retry
+                            continue
+
+                        consecutive_errors = 0
+                        next_read_time = time.time() + self.sample_rate
+
+                        # Log temperature directly to the database
+                        if self.recording_enabled and self.run_id is not None:
+                            await self.db_manager.record_temperature(self.run_id, current_temp)
+
+                        target_reached_flag, last_announced_temp = await self._handle_temperature_update(
+                            app, current_temp, current_time, 
+                            target_temp, direction, last_announced_temp,
+                            target_reached_flag, start_time
+                        )
+                        
+                    await asyncio.sleep(min(0.1, self.sample_rate / 10))  # Scale sleep with sample rate
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    self.logger.exception(f"Error in monitor loop: {e}")
+                    await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.logger.info("Monitor loop cancelled")
+        except Exception as e:
+            self.logger.exception(f"Fatal error in monitor loop: {e}")
+        finally:
+            self.logger.info("Monitor loop completed")
+
+    async def safe_read_temperature(self) -> Optional[float]:
+        """Safely read temperature from the sensor."""
+        if not self.temp_sensor:
+            self.logger.warning("Temperature sensor is not initialized.")
+            return None
+        try:
+            return await asyncio.to_thread(self.temp_sensor.read_data, 'Temperature')
+        except Exception as e:
+            self.logger.warning(f"Error reading temperature: {e}")
+            return None
+
+    async def _database_recorder(self):
+        """Async task to handle database recording"""
+        try:
+            self.logger.debug("Starting database recorder task")
+            while not self.exit_flag.is_set() or not self.record_queue.empty():
+                try:
+                    self.logger.debug(f"Waiting for temperature data. Queue size: {self.record_queue.qsize()}")
+                    run_id, temperature = await asyncio.wait_for(
+                        self.record_queue.get(), 
+                        timeout=1.0
+                    )
+                    self.logger.debug(f"Processing temperature {temperature}°C for run {run_id}")
+                    await self._record_to_database(run_id, temperature)
+                    self.record_queue.task_done()
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    self.logger.error(f"Error in database recorder: {e}")
+                    await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.logger.info("Database recorder cancelled")
+            # Process remaining items in queue
+            while not self.record_queue.empty():
+                try:
+                    run_id, temperature = self.record_queue.get_nowait()
+                    await self._record_to_database(run_id, temperature)
+                    self.record_queue.task_done()
+                except Exception as e:
+                    self.logger.error(f"Error processing remaining data: {e}")
+        except Exception as e:
+            self.logger.exception(f"Fatal error in database recorder: {e}")
+
+    async def _record_to_database(self, run_id: int, temperature: float) -> None:  # Changed from _log_to_database
+        """Record temperature reading to database."""
+        try:
+            await self.db_manager.record_temperature(run_id, temperature)
+        except Exception as e:
+            self.logger.error(f"Error recording to database: {e}")
+
+    async def _handle_temperature_update(
+        self, app: 'TemperatureUI', 
+        current_temp: float, 
+        current_time: datetime,
+        target_temp: float,
+        direction: Literal['increases', 'decreases'],
+        last_announced_temp: Optional[float],
+        target_reached_flag: bool,
+        start_time: float
+    ) -> tuple[bool, Optional[float]]:
+        """Handle temperature updates including logging and notifications."""
+        try:
+            # Update the UI with current temperature
+            await app.update_temperature(current_temp, current_time)
+            
+            # Record temperature directly if enabled
+            if self.recording_enabled and self.run_id is not None:
+                await self.db_manager.record_temperature(self.run_id, current_temp)
+            
+            # Update graph
+            elapsed_time = time.time() - start_time
+            await self.temperature_buffer.add(current_temp, elapsed_time)
+            self.logger.debug(f"Added to buffer - Temp: {current_temp}, Time: {elapsed_time}")
+            
+            # Check if target has been reached
+            if not target_reached_flag and target_reached(direction, target_temp, current_temp):
+                target_reached_flag = True
+                if not self._shutting_down:
+                    # Only play sound if voice is enabled
+                    if self.config_manager.voice_config.enabled:
+                        await self.play_tts_message(f"Target temperature of {target_temp:.1f} degrees has been reached")
+                    
+                    # Show popup
+                    popup = NotificationPopup(f"Target temperature of {target_temp:.1f}°C has been reached!")
+                    result = await app.push_screen(popup)
+                    
+                    # Send notification with high priority for target reached
+                    await self.notification_manager.send_notification(
+                        message=f"Target temperature of {target_temp:.1f}°C has been reached! Current temperature: {current_temp:.1f}°C",
+                        title="Temperature Target Reached",
+                        priority="high",
+                        tags=["alarm_clock"]
+                    )
+                    
+                    self.logger.info(f"Target temperature {target_temp:.1f}°C reached")
+
+            # Announce temperature changes
+            current_time = time.time()
+            if (self.config_manager.voice_config.enabled and
+                (last_announced_temp is None or 
+                (abs(current_temp - last_announced_temp) >= 1.0 and 
+                 current_time - self.last_announcement_time >= ANNOUNCE_PERIOD_S))):
+                if not self._shutting_down:
+                    await self.play_tts_message(f"Current temperature is {current_temp:.1f} degrees")
+                    # Send regular temperature updates with default priority
+                    await self.notification_manager.send_notification(
+                        message=f"Current temperature is {current_temp:.1f}°C",
+                        title="Temperature Update",
+                        priority="default"
+                    )
+
+                self.last_announcement_time = current_time
+                last_announced_temp = current_temp
+            
+            return target_reached_flag, last_announced_temp
+            
+        except Exception as e:
+            self.logger.error(f"Error in temperature update: {e}")
+            return target_reached_flag, last_announced_temp
+
+    async def play_tts_message(self, message: str) -> None:
+        """Convert text to speech and play it asynchronously."""
+        try:
+            self.logger.debug(f"Starting TTS playback: '{message}'")
+            
+            # Convert message to speech and write to BytesIO
+            tts = await asyncio.to_thread(lambda: gTTS(text=message, lang='en'))
+            fp = BytesIO()
+            await asyncio.to_thread(tts.write_to_fp, fp)
+            fp.seek(0)
+            
+            self.logger.debug("Text-to-speech conversion completed")
+            
+            # Update the sound source and play
+            self.tts_player.sound_source = fp
+            await self.tts_player.start()
+            
+            # Wait for sound to finish naturally
+            while pygame.mixer.get_busy():
+                await asyncio.sleep(0.1)
+            
+            self.logger.debug("TTS playback completed successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error in TTS playback: {e}")
+            self.logger.debug(f"Detailed error information: {str(e)}", exc_info=True)
+
+    async def initialize(self) -> None:
+        """Initialize the monitor including database."""
+        await self.db_manager.initialize()
+
+    async def cleanup(self):
+        """Clean up resources and ensure all tasks are terminated."""
+        try:
+            # Set exit flag first to stop all running loops
+            self.exit_flag.set()
+            
+            # Cancel and await all running tasks
+            for task in self.running_tasks:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        self.logger.debug(f"Task {task} cancelled")
+                    except Exception as e:
+                        self.logger.error(f"Error awaiting task {task}: {e}")
+            self.running_tasks.clear()
+
+            # Clean up sensor connection
+            if self.temp_sensor:
+                try:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, self._disconnect_sensor)
+                except Exception as e:
+                    self.logger.error(f"Error disconnecting sensor: {e}")
+                finally:
+                    self.logger.debug("Disconnected from sensor")
+                    self.temp_sensor = None
+
+            # Clean up notification manager
+            if hasattr(self, 'notification_manager'):
+                await self.notification_manager.cleanup()
+
+            # Clean up database connection
+            await self.db_manager.close()
+
+            # Add cleanup for tts_player
+            if hasattr(self, 'tts_player'):
+                await self.tts_player.cleanup()
+
+        except Exception as e:
+            self.logger.exception(f"Error during cleanup: {e}")
+        finally:
+            self.logger.info("Cleanup completed")
+
+    def _disconnect_sensor(self):
+        """Safely disconnect the sensor in a synchronous context."""
+        if self.temp_sensor:
+            try:
+                if self.temp_sensor.is_connected():
+                    self.temp_sensor.disconnect()
+                    time.sleep(0.5)  # Small delay to ensure disconnect completes
+            except Exception as e:
+                self.logger.error(f"Error in _disconnect_sensor: {e}")
+
+    async def enable_recording(self, target_temp: float, direction: str) -> None:
+        """Enable temperature recording to database."""
+        try:
+            self.logger.debug(f"Enabling recording - Target: {target_temp}°C, Direction: {direction}")
+            self.run_id = await self.db_manager.create_run(target_temp, direction)
+            self.recording_enabled = True
+            self.logger.info(f"Recording enabled with run_id: {self.run_id}")
+            
+        except Exception as e:
+            self.logger.exception(f"Error enabling recording: {e}")
+            self.recording_enabled = False
+            self.run_id = None
+
+    async def disable_recording(self) -> None:
+        """Disable temperature recording."""
+        try:
+            self.logger.debug("Disabling temperature recording")
+            self.recording_enabled = False
+            self.run_id = None
+            self.logger.info("Recording disabled")
+            
+        except Exception as e:
+            self.logger.exception(f"Error disabling recording: {e}")
+
+    async def toggle_recording(self) -> bool:
+        """Toggle recording state."""
+        if self.recording_enabled:
+            await self.disable_recording()
+        else:
+            # Can't enable without parameters
+            # await self.enable_recording()  # This won't work
+            self.logger.error("Cannot enable recording without target temperature and direction")
+            return False
+        return self.recording_enabled
+
+class TemperatureMonitorOld(BaseTemperatureMonitor):
     def __init__(self, sample_rate: float = 2.0):
         super().__init__(sample_rate)
         self._setup_logging()
@@ -97,6 +444,9 @@ class TemperatureMonitor(BaseTemperatureMonitor):
         
         # Store config manager reference
         self.config_manager = config_manager
+        
+        # Initialize TTS sound player
+        self.tts_player = AsyncSoundPlayer(None)  # Initialize without sound source
         
     def _setup_logging(self):
         """Set up logging for the temperature monitor"""
@@ -168,6 +518,7 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                     await asyncio.sleep(1)
         except asyncio.CancelledError:
             self.logger.info("Monitor loop cancelled")
+            # Perform any necessary cleanup here
         except Exception as e:
             self.logger.exception(f"Fatal error in monitor loop: {e}")
         finally:
@@ -202,11 +553,11 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                 if not task.done():
                     task.cancel()
                     try:
-                        await asyncio.shield(task)
+                        await task
                     except asyncio.CancelledError:
-                        pass
+                        self.logger.debug(f"Task {task} cancelled")
                     except Exception as e:
-                        self.logger.error(f"Error cancelling task {task}: {e}")
+                        self.logger.error(f"Error awaiting task {task}: {e}")
             self.running_tasks.clear()
 
             # Clean up sensor connection
@@ -256,6 +607,10 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                         break
             except Exception as e:
                 self.logger.error(f"Error draining log queue: {e}")
+
+            # Add cleanup for tts_player
+            if hasattr(self, 'tts_player'):
+                await self.tts_player.cleanup()
 
         except Exception as e:
             self.logger.exception(f"Error during cleanup: {e}")
@@ -318,7 +673,7 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                 if not self._shutting_down:
                     # Only play sound if voice is enabled
                     if self.config_manager.voice_config.enabled:
-                        await self.play_sound_async(f"Target temperature of {target_temp:.1f} degrees has been reached")
+                        await self.play_tts_message(f"Target temperature of {target_temp:.1f} degrees has been reached")
                     
                     # Show popup
                     popup = NotificationPopup(f"Target temperature of {target_temp:.1f}°C has been reached!")
@@ -343,7 +698,7 @@ class TemperatureMonitor(BaseTemperatureMonitor):
                 (abs(current_temp - last_announced_temp) >= 1.0 and 
                  current_time - self.last_announcement_time >= ANNOUNCE_PERIOD_S))):
                 if not self._shutting_down:
-                    await self.play_sound_async(f"Current temperature is {current_temp:.1f} degrees")
+                    await self.play_tts_message(f"Current temperature is {current_temp:.1f} degrees")
                     # Send regular temperature updates with default priority
                     await self.notification_manager.send_notification(
                         message=f"Current temperature is {current_temp:.1f}°C",
@@ -359,55 +714,41 @@ class TemperatureMonitor(BaseTemperatureMonitor):
         except Exception as e:
             self.logger.error(f"Error in temperature update: {e}")
             return target_reached_flag, last_announced_temp
-    
-    def play_sound(self, message: str) -> None:
+            
+    async def play_tts_message(self, message: str) -> None:
         """
-        Play a text-to-speech message directly from memory without saving to disk.
+        Convert text to speech and play it asynchronously.
         
         Args:
             message: The text message to convert to speech and play
-        
-        Raises:
-            RuntimeError: If pygame mixer initialization fails
-            Exception: For other errors during TTS or playback
         """
         try:
-            # Initialize pygame mixer first to catch initialization errors early
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
-                
-            # Convert message to speech and write to BytesIO (in MP3 format)
+            self.logger.debug(f"Starting TTS playback: '{message}'")
+            
+            # Convert message to speech and write to BytesIO
             tts = gTTS(text=message, lang='en')
             fp = BytesIO()
             tts.write_to_fp(fp)
             fp.seek(0)
-
-            # Load and play audio from BytesIO object
-            pygame.mixer.music.load(fp, 'mp3')
-            pygame.mixer.music.play()
-
-            # Keep the program running while the audio plays
-            while pygame.mixer.music.get_busy():
-                pygame.time.Clock().tick(10)
-
+            
+            self.logger.debug("Text-to-speech conversion completed")
+            
+            # Update the sound source
+            self.tts_player.sound_source = fp
+            
+            # Play the sound
+            self.logger.debug("Starting sound playback")
+            await self.tts_player.start()
+            
+            # Wait for sound to finish naturally
+            while pygame.mixer.get_busy():
+                await asyncio.sleep(0.1)
+            
+            self.logger.debug("TTS playback completed successfully")
+            
         except Exception as e:
-            print(f"Error playing sound: {e}")
-        finally:
-            # Clean up resources
-            pygame.mixer.quit()
-
-    async def play_sound_async(self, message: str) -> None:
-        """
-        Asynchronously play a text-to-speech message.
-        
-        Args:
-            message: The text message to convert to speech and play
-        """
-        try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(self.thread_pool, self.play_sound, message)
-        except Exception as e:
-            self.logger.error(f"Error in play_sound_async: {e}")
+            self.logger.error(f"Error in TTS playback: {e}")
+            self.logger.debug(f"Detailed error information: {str(e)}", exc_info=True)
 
     async def scan(self):
         """
@@ -507,12 +848,6 @@ def select_sensor() -> Optional[PASCOBLEDevice]:
     print(f"Connected to: {found_devices[selected_index].name}")
     return temp_sensor
 
-async def log_temperature(temperature: float):
-    """Add temperature to the logging queue."""
-    global run_id
-    if logging_enabled and run_id is not None:
-        await log_queue.put((run_id, temperature))
-
 async def update_graph(temperature: float, timestamp: float):
     """Thread-safe update of the temperature graph data."""
     await temperature_buffer.add(temperature, timestamp)
@@ -534,29 +869,11 @@ async def graph_display_loop():
         await display_graph()
         await asyncio.sleep(5)  # Update every 5 seconds
 
-async def database_logger():
-    """Function to handle database logging in the main thread."""
-    global db_connection, exit_flag
-    while not exit_flag.is_set() or not log_queue.empty():
-        try:
-            run_id, temperature = await log_queue.get()
-            cursor = db_connection.cursor()
-            cursor.execute(
-                "INSERT INTO temperature_logs (run_id, temperature) VALUES (?, ?)",
-                (run_id, temperature)
-            )
-            db_connection.commit()
-        except asyncio.QueueEmpty:
-            continue
-        except Exception as e:
-            print(f"Error logging to database: {e}")
-        await asyncio.sleep(0.1)  # Small delay to prevent CPU hogging
-
 class ResourceManager:
     """Manage application resources and ensure proper cleanup"""
     
     def __init__(self):
-        self.db_connection: Optional[sqlite3.Connection] = None
+        self.db_connection: Optional[AioConnection] = None
         self.temp_sensor: Optional[PASCOBLEDevice] = None
         self._lock = asyncio.Lock()
 
@@ -572,7 +889,7 @@ class ResourceManager:
 
             if self.db_connection:
                 try:
-                    self.db_connection.close()
+                    await self.db_connection.close()
                 except Exception as e:
                     logger.error(f"Error closing database: {e}")
                 self.db_connection = None
@@ -592,7 +909,11 @@ async def setup_signal_handlers(app: TemperatureUI):
         asyncio.create_task(app.stop_monitoring())  # Changed from cleanup_and_exit to stop_monitoring
 
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, handle_signal)
+        try:
+            loop.add_signal_handler(sig, handle_signal)
+        except NotImplementedError:
+            # Signal handling may not be implemented on some platforms
+            logger.warning(f"Signal handling not supported for {sig}")
 
 class TemperatureAlarmApp:
     """The main Temperature Alarm application."""
@@ -619,10 +940,19 @@ class TemperatureAlarmApp:
 
     async def stop_monitoring(self) -> None:
         """Stop temperature monitoring."""
-        self.monitoring = False
-        if hasattr(self, 'monitor_button'):
-            self.monitor_button.label = "Start Monitoring"
-            self.monitor_button.variant = "success"
+        try:
+            self.monitoring = False
+            
+            # Disable recording if it was enabled
+            if self.recording_enabled:
+                await self.disable_recording()
+                
+            if hasattr(self, 'monitor_button'):
+                self.monitor_button.label = "Start Monitoring"
+                self.monitor_button.variant = "success"
+                
+        except Exception as e:
+            self.logger.exception(f"Error stopping monitoring: {e}")
 
     async def cleanup_and_exit(self) -> None:
         """Clean up resources and exit the application."""
@@ -641,17 +971,18 @@ async def main():
         monitor = TemperatureMonitor()
         app.monitor = monitor
         
+        # Initialize monitor (including database)
+        await monitor.initialize()
+        
         # Run the app
         await app.run_async()
         
     except Exception as e:
         logger.exception(f"An error occurred: {e}")
     finally:
-        # Ensure cleanup happens
         if 'monitor' in locals():
             await monitor.cleanup()
         logger.info("Application shutdown complete")
 
 if __name__ == "__main__":
     asyncio.run(main())
-
