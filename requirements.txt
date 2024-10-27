@@ -3,10 +3,10 @@ plotext
 pasco
 bleak
 pygame
-gtts
-sqlite-minutils 
+gtts 
 aiosqlite
 textual-plotext
 httpx>=0.24.0
 tomli>=2.0.1; python_version < "3.11"
 tomli-w>=1.0.0
+pydub

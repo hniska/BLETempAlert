@@ -252,7 +252,7 @@ class TemperatureAlarmApp(App):
             self.notify("Monitor not initialized", severity="error")
             return
 
-        temp_sensor = PASCOBLEDevice()  # Create temporary sensor for scanning
+        temp_sensor = PASCOBLEDevice() 
         found_devices = temp_sensor.scan()
 
         if not found_devices:
@@ -275,13 +275,10 @@ class TemperatureAlarmApp(App):
         
         device_select.set_options(device_options)
         
-        # Remove automatic connection for single device
-        # Instead, just set the dropdown value which will trigger the connection
         if len(found_devices) == 1:
             first_option = device_options[0][0]
             device_select.value = first_option
-            # Remove the direct connection call here
-
+           
     async def _connect_device(self, device_index: int):
         """
         Connect to the selected PASCO BLE device.
@@ -290,9 +287,7 @@ class TemperatureAlarmApp(App):
             device_index: The index of the device in self.found_devices
         """
         try:
-            # Create a new PASCOBLEDevice instance
             temp_sensor = PASCOBLEDevice()
-            # Connect to the selected device using the BLEDevice object
             selected_device = self.found_devices[device_index]
             
             # Try to connect with a timeout
@@ -320,7 +315,6 @@ class TemperatureAlarmApp(App):
             self.logger.error(error_msg, exc_info=True)
             self.notify(error_msg, severity="error")
             
-            # Clean up the failed connection attempt
             if 'temp_sensor' in locals():
                 try:
                     temp_sensor.disconnect()
@@ -414,13 +408,12 @@ class TemperatureAlarmApp(App):
 
     def on_mount(self):
         """Handle the app mount event."""
-        from logging_config import TUIHandler  # Import at use to avoid circular imports
+        from logging_config import TUIHandler 
         
         self.title = "Temperature Alarm"
-        # Register app with TUI handler
+        
         TUIHandler.set_app(self)
         
-        # Set up signal handlers
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self._handle_signal()))
