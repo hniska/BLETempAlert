@@ -6,6 +6,7 @@ from datetime import datetime
 import nest_asyncio
 import plotext as plt
 import textual.css.query  # Add this import at the top of the file
+import platform
 
 nest_asyncio.apply()
 
@@ -414,15 +415,27 @@ class TemperatureAlarmApp(App):
         
         TUIHandler.set_app(self)
         
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self._handle_signal()))
+        # Platform-specific signal handling
+        if platform.system() == 'Windows':
+            # Windows only supports SIGINT and not in add_signal_handler
+            try:
+                signal.signal(signal.SIGINT, lambda sig, frame: asyncio.create_task(self._handle_signal()))
+                # SIGBREAK is Windows-specific Ctrl+Break signal
+                signal.signal(signal.SIGBREAK, lambda sig, frame: asyncio.create_task(self._handle_signal()))
+            except (AttributeError, ValueError) as e:
+                self.logger.warning(f"Could not set up Windows signal handlers: {e}")
+        else:
+            # Unix-like systems can use add_signal_handler
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, lambda: asyncio.create_task(self._handle_signal()))
         
         # Initialize notification settings
         self._init_notification_settings()
 
     async def _handle_signal(self):
         """Handle interrupt signals."""
+        self.logger.info("Received shutdown signal")
         self.notify("Received shutdown signal", severity="warning")
         await self._exit_app()
 
