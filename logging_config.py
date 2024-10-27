@@ -57,7 +57,7 @@ class DualHandler(logging.Handler):
             self.file_handler.emit(record)
             
             # Emit to TUI only if it's appropriate level and has apps registered
-            if record.levelno >= self.tui_handler.level and self.tui_handler._apps:
+            if record.levelno >= self.tui_handler.level and self.tui_handler._app:
                 self.tui_handler.emit(record)
                 
         except Exception as e:
