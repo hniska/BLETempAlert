@@ -254,8 +254,19 @@ class TemperatureAlarmApp(App):
             return
 
         try:
-            temp_sensor = PASCOBLEDevice() 
-            found_devices = temp_sensor.scan()
+            self.notify("Scanning for devices...", severity="information")
+            temp_sensor = PASCOBLEDevice()
+            
+            # Add error handling for the scan operation
+            try:
+                found_devices = temp_sensor.scan()
+            except AttributeError as e:
+                if "property is not available" in str(e):
+                    self.logger.warning("Running on Windows version with limited BLE support")
+                    # Continue with scan results if any were found before the error
+                    found_devices = getattr(temp_sensor, '_found_devices', [])
+                else:
+                    raise
 
             if not found_devices:
                 self.notify("No devices found", severity="warning")
@@ -269,31 +280,38 @@ class TemperatureAlarmApp(App):
             
             for i, device in enumerate(found_devices):
                 try:
-                    # More robust device name parsing
-                    device_name = getattr(device, 'name', str(device))
-                    if ' ' in device_name:
-                        device_id = device_name.split()[1].split('>')[0]
-                    else:
-                        device_id = device_name
+                    # More robust device name handling
+                    device_name = str(getattr(device, 'name', device))
+                    # Clean up the device name
+                    device_id = device_name.split()[1].split('>')[0] if ' ' in device_name else device_name
+                    device_id = device_id.strip()
+                    
+                    if not device_id:
+                        device_id = f"Device {i+1}"
                     
                     self.device_map[device_id] = i
                     device_options.append((device_id, device_id))
-                except (IndexError, AttributeError) as e:
-                    # Fallback to using full device name
-                    safe_name = str(getattr(device, 'name', device))
+                    
+                except Exception as e:
+                    # Fallback device naming
+                    safe_name = f"Device {i+1}"
                     self.device_map[safe_name] = i
                     device_options.append((safe_name, safe_name))
-                    self.logger.debug(f"Device name parsing fallback: {e}")
+                    self.logger.debug(f"Device name parsing fallback for device {i}: {e}")
             
             device_select.set_options(device_options)
             
             if len(found_devices) == 1:
                 first_option = device_options[0][0]
                 device_select.value = first_option
+                self.notify("Found 1 device", severity="success")
+            else:
+                self.notify(f"Found {len(found_devices)} devices", severity="success")
                 
         except Exception as e:
-            self.logger.error(f"Error during device scan: {e}", exc_info=True)
-            self.notify(f"Scan error: {str(e)}", severity="error")
+            error_msg = f"Scan error: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            self.notify(error_msg, severity="error")
 
     async def _connect_device(self, device_index: int):
         """
