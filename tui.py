@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 from datetime import datetime
 import nest_asyncio
 import plotext as plt
-import textual.css.query  # Add this import at the top of the file
+import textual.css.query 
 import platform
 
 nest_asyncio.apply()
@@ -18,7 +18,7 @@ from textual.message import Message
 from logging_config import setup_logging
 from temperature_alarm import TemperatureMonitor, select_sensor, exit_flag
 from temperature_types import TemperatureUI
-from textual_plotext import PlotextPlot  # Add this import
+from textual_plotext import PlotextPlot  
 
 logger = setup_logging(__name__)
 
@@ -253,33 +253,48 @@ class TemperatureAlarmApp(App):
             self.notify("Monitor not initialized", severity="error")
             return
 
-        temp_sensor = PASCOBLEDevice() 
-        found_devices = temp_sensor.scan()
+        try:
+            temp_sensor = PASCOBLEDevice() 
+            found_devices = temp_sensor.scan()
 
-        if not found_devices:
-            self.notify("No devices found", severity="warning")
-            return
+            if not found_devices:
+                self.notify("No devices found", severity="warning")
+                return
 
-        device_select = self.query_one("#device_select")
-        self.found_devices = found_devices
-        
-        device_options = []
-        self.device_map = {}
-        for i, device in enumerate(found_devices):
-            try:
-                device_id = device.name.split()[1].split('>')[0]
-                self.device_map[device_id] = i
-                device_options.append((device_id, device_id))
-            except (IndexError, AttributeError):
-                self.device_map[device.name] = i
-                device_options.append((device.name, device.name))
-        
-        device_select.set_options(device_options)
-        
-        if len(found_devices) == 1:
-            first_option = device_options[0][0]
-            device_select.value = first_option
-           
+            device_select = self.query_one("#device_select")
+            self.found_devices = found_devices
+            
+            device_options = []
+            self.device_map = {}
+            
+            for i, device in enumerate(found_devices):
+                try:
+                    # More robust device name parsing
+                    device_name = getattr(device, 'name', str(device))
+                    if ' ' in device_name:
+                        device_id = device_name.split()[1].split('>')[0]
+                    else:
+                        device_id = device_name
+                    
+                    self.device_map[device_id] = i
+                    device_options.append((device_id, device_id))
+                except (IndexError, AttributeError) as e:
+                    # Fallback to using full device name
+                    safe_name = str(getattr(device, 'name', device))
+                    self.device_map[safe_name] = i
+                    device_options.append((safe_name, safe_name))
+                    self.logger.debug(f"Device name parsing fallback: {e}")
+            
+            device_select.set_options(device_options)
+            
+            if len(found_devices) == 1:
+                first_option = device_options[0][0]
+                device_select.value = first_option
+                
+        except Exception as e:
+            self.logger.error(f"Error during device scan: {e}", exc_info=True)
+            self.notify(f"Scan error: {str(e)}", severity="error")
+
     async def _connect_device(self, device_index: int):
         """
         Connect to the selected PASCO BLE device.
